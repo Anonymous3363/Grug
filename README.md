@@ -1,1 +1,3 @@
-# code for nips 2023
+# e.g.:
+ python  main.py --dataset ACM -a 0.35 -b 0.01
+
