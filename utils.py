@@ -62,6 +62,8 @@ def load_data(dataset, remove_self_loop=False):
         return load_amazon(remove_self_loop)
     elif dataset == 'LastFM':
         return load_lastfm(remove_self_loop)
+    elif dataset == 'OGBN-MAG':
+        return load_ogb(remove_self_loop)
     else:
         return NotImplementedError('Unsupported dataset {}'.format(dataset))
 
@@ -146,6 +148,99 @@ def load_imdb(remove_self_loop):
            label, labels.to(device), num_classes, \
            train_mask.to(device), val_mask.to(device), test_mask.to(device)
 
+
+# def load_ogb(remove_self_loop):
+#     from ogb.nodeproppred import DglNodePropPredDataset
+#
+#     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+#     dataset = DglNodePropPredDataset(name='ogbn-mag')
+#     split_idx = dataset.get_idx_split()
+#     train_idx, valid_idx, test_idx = split_idx["train"], split_idx["valid"], split_idx["test"]
+#     hg, labels_t = dataset[0]
+#
+#     labels = torch.squeeze(labels_t['paper'])
+#     choice = [i for i, x in enumerate(labels) if x == 1 or x == 134]
+#     choice = np.array(choice)
+#     # num_catgory = hg.number_of_nodes('paper')
+#     # catgory_numpy = np.arange(num_catgory)
+#     # choice = np.random.choice(catgory_numpy, int(len(catgory_numpy) * 0.01))
+#     # np.save('choice.txt', choice)
+#     # choice = np.load('choice.txt')
+#     hg = dgl.sampling.sample_neighbors(hg, {'paper': choice}, 1)
+#     hg = dgl.node_type_subgraph(hg, ['author', 'paper'])
+#
+#     new_labels = [int(0) if i==134 else int(i) for i in labels]
+#     labels = torch.tensor(new_labels)
+#
+#     train_mask = np.zeros(hg.number_of_nodes('paper'))
+#     val_mask = np.zeros(hg.number_of_nodes('paper'))
+#     test_mask = np.zeros(hg.number_of_nodes('paper'))
+#     paper_features = hg.ndata['feat']['paper']
+#     author_features = torch.rand(hg.number_of_nodes('author'), paper_features.shape[1])
+#     # field_of_study_features = torch.rand(hg.number_of_nodes('field_of_study'), paper_features.shape[1])
+#     # institution_features = torch.rand(hg.number_of_nodes('institution'), paper_features.shape[1])
+#     # etypes = ['affiliated_with', 'writes', 'cites', 'has_topic']
+#
+#     etypes = ['writes', 'cites']
+#     num_classes = 2
+#     print(hg)
+#     for train_id in train_idx['paper'].numpy():
+#         if choice.__contains__(train_id):
+#             train_mask[train_id] = 1
+#     for val_id in valid_idx['paper'].numpy():
+#         if choice.__contains__(val_id):
+#             val_mask[val_id] = 1
+#     for test_id in test_idx['paper'].numpy():
+#         if choice.__contains__(test_id):
+#             test_mask[test_id] = 1
+#
+#     # np.save('train_mask.txt', train_mask)
+#     # np.save('val_mask.txt', val_mask)
+#     # np.save('test_mask.txt', test_mask)
+#
+#     # train_mask = np.load('train_mask.txt')
+#     # val_mask = np.load('val_mask.txt')
+#     # test_mask = np.load('test_mask.txt')
+#
+#     if hasattr(torch, 'BoolTensor'):
+#         train_mask = torch.tensor(train_mask).bool()
+#         val_mask = torch.tensor(val_mask).bool()
+#         test_mask = torch.tensor(test_mask).bool()
+#
+#     # from collections import Counter
+#     # res = Counter(labels[train_mask].tolist())
+#     # print(res)
+#     print(hg)
+#     print(author_features.shape)
+#     return hg.to(device), etypes, {'author': author_features.to(device), 'paper': paper_features.to(device)}, \
+#            'paper', labels.to(device), num_classes, \
+#            train_mask.to(device), val_mask.to(device), test_mask.to(device)
+
+def load_ogb(remove_self_loop):
+    from ogb.nodeproppred import DglNodePropPredDataset
+
+    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    dataset = DglNodePropPredDataset(name='ogbn-mag')
+    split_idx = dataset.get_idx_split()
+    train_idx, valid_idx, test_idx = split_idx["train"]['paper'], split_idx["valid"]['paper'], split_idx["test"]['paper']
+    hg, labels = dataset[0]
+
+    features = hg.nodes['paper'].data['feat']
+    hg.nodes["paper"].data["feat"] = features
+
+
+    labels = labels['paper'].to(device).squeeze()
+    n_classes = int(labels.max() - labels.min()) + 1
+
+    target_node_type = "paper"
+    feature_node_types = [target_node_type]
+
+    print(n_classes)
+    print(feature_node_types)
+    print(features.shape)
+    # return hg.to(device), etypes, {'author': author_features.to(device), 'paper': paper_features.to(device)}, \
+    #        'paper', labels.to(device), num_classes, \
+    #        train_mask.to(device), val_mask.to(device), test_mask.to(device)
 
 def load_amazon(remove_self_loop):
     from openhgnn import HGBDataset
@@ -357,6 +452,6 @@ def load_lastfm(remove_self_loop):
                        'tag': hg.number_of_nodes('tag')})
     label = 'artist'
     return path, label, False, hg.to(device), {'artist': artist_features.to(device), 'user': user_features.to(device),
-                                        'tag': tag_features.to(
-                                            device)}, train_pos_hg.to(device), train_neg_hg.to(
+                                               'tag': tag_features.to(
+                                                   device)}, train_pos_hg.to(device), train_neg_hg.to(
         device), val_pos_hg.to(device), val_neg_hg.to(device), test_pos_hg.to(device), test_neg_hg.to(device)

@@ -5,13 +5,18 @@ from sklearn.metrics import precision_score
 from sklearn.metrics import recall_score
 from sklearn.metrics import f1_score
 from Config import Config
+from data.dataset_info import ACM, DBLP, IMDB, OBGN_MAG
+from model.HAN import HAN
+from model.HGT import HGT
 from model.RGCN import RGCN
 from model.RGAT import RGAT
+from model.SimpleHGN import SimpleHGN
 from utils import load_data, EarlyStopping
 from sklearn.metrics import roc_auc_score
 import copy
 import dgl.function as fn
 import itertools
+
 
 class HeteroDotProductPredictor(torch.nn.Module):
     def forward(self, graph, h, etype):
@@ -39,9 +44,9 @@ def compute_auc(pos_score, neg_score):
 
 class Experiments(object):
     def __init__(self, model_name, task, dataset, alpha, beta, M, hidden, num_layers, patience, num_epochs, lr,
-                 weight_decay, fixed_lr, max_lr):
+                 weight_decay, fixed_lr, max_lr, num_heads, edge_dim, negative_slope, Simple_beta):
         self.config = Config(model_name, task, dataset, alpha, beta, M, hidden, num_layers, patience, num_epochs, lr,
-                             weight_decay, fixed_lr, max_lr)
+                             weight_decay, fixed_lr, max_lr, num_heads, edge_dim, negative_slope, Simple_beta)
         self.device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
     @staticmethod
@@ -87,13 +92,70 @@ class Experiments(object):
                          out_dim=num_classes,
                          etypes=etypes,
                          num_hidden_layers=self.config.num_layers,
-                       ).to(self.device)
+                         ).to(self.device)
         elif self.config.model == 'RGAT':
             model = RGAT(in_dim=features[label].shape[1],
                          h_dim=self.config.hidden,
                          out_dim=num_classes,
                          etypes=etypes
                          ).to(self.device)
+        elif self.config.model == 'HGT':
+            if self.config.dataset == 'ACM':
+                dataset_info = ACM(features)
+            elif self.config.dataset == 'DBLP':
+                dataset_info = DBLP(features)
+            elif self.config.dataset == 'IMDB':
+                dataset_info = IMDB(features)
+            elif self.config.dataset == 'OGBN-MAG':
+                dataset_info = OBGN_MAG(features)
+            model = HGT(in_dims=dataset_info.in_dims,
+                        hidden_dim=self.config.hidden,
+                        out_dim=num_classes,
+                        num_heads=self.config.num_heads,
+                        ntypes=dataset_info.ntypes,
+                        etypes=dataset_info.etypes,
+                        predict_ntype=label,
+                        num_layers=self.config.num_layers).to(self.device)
+        elif self.config.model == 'HAN':
+            if self.config.dataset == 'ACM':
+                meta_path = {'mp0': [('paper', 'paper-author', 'author'), ('author', 'author-paper', 'paper')],
+                             'mp1': [('paper', 'paper-subject', 'subject'), ('subject', 'subject-paper', 'paper')]}
+            elif self.config.dataset == 'DBLP':
+                meta_path = {'APCPA': [('author', 'author-paper', 'paper'), ('paper', 'paper-conference', 'conference'),
+                                       ('conference', 'conference-paper', 'paper'),
+                                       ('paper', 'paper-author', 'author')],
+                             'APA': [('author', 'author-paper', 'paper'), ('paper', 'paper-author', 'author')]}
+            elif self.config.dataset == 'IMDB':
+                meta_path = {'mp0': [('movie', 'movie-actor', 'actor'), ('actor', 'actor-movie', 'movie')],
+                             'mp1': [('movie', 'movie-director', 'director'), ('director', 'director-movie', 'movie')]}
+            elif self.config.dataset == 'OGBN-MAG':
+                meta_path = {'mp0': [('paper', 'cites', 'paper'), ('author', 'writes', 'paper')]}
+            model = HAN(in_size=features[label].shape[1],
+                        meta_paths=meta_path,
+                        category=[label],
+                        num_heads=[self.config.num_heads],
+                        hidden_size=self.config.hidden,
+                        out_size=num_classes,
+                        dropout=0
+                        ).to(self.device)
+        elif self.config.model == 'SimpleHGN':
+            if self.config.dataset == 'ACM' or self.config.dataset == 'DBLP' or self.config.dataset == 'IMDB':
+                num_etypes = 4
+            elif self.config.dataset == 'OGBN-MAG':
+                num_etypes = 2
+            model = SimpleHGN(
+                edge_dim=self.config.edge_dim,
+                num_etypes=num_etypes,
+                in_dim=[features[label].shape[1]],
+                hidden_dim=self.config.hidden,
+                num_classes=num_classes,
+                num_layers=self.config.num_layers,
+                heads=[self.config.num_heads, self.config.num_heads],
+                feat_drop=0,
+                negative_slope=self.config.negative_slope,
+                residual=False,
+                beta=self.config.Simple_beta
+            ).to(self.device)
         stopper = EarlyStopping(patience=self.config.patience)
         loss_fcn = torch.nn.CrossEntropyLoss()
         optimizer = torch.optim.Adam(model.parameters(), lr=self.config.lr,
@@ -104,6 +166,7 @@ class Experiments(object):
             train_step = 0
 
         for epoch in range(self.config.num_epochs):
+            torch.cuda.empty_cache()
             model.train()
             optimizer.zero_grad()
             delta = torch.FloatTensor(*features[label].shape).uniform_(-self.config.beta, self.config.beta).to(
@@ -125,7 +188,32 @@ class Experiments(object):
                                                                                                self.config.alpha)).to(
                         self.device)
                     gamma[r].requires_grad_()
-
+            elif self.config.model == 'HGT':
+                for r in etypes:
+                    if self.config.dataset == 'OGBN-MAG':
+                        if r == 'writes':
+                            base = torch.FloatTensor(
+                                np.zeros((hg.number_of_nodes('author'), self.config.hidden)))
+                        elif r == 'cites':
+                            base = torch.FloatTensor(
+                                np.zeros((hg.number_of_nodes('paper'), self.config.hidden)))
+                    else:
+                        base = torch.FloatTensor(np.zeros((hg.number_of_nodes(r.split('-')[0]), self.config.hidden)))
+                    gamma[r] = base.uniform_(-self.config.alpha, self.config.alpha).to(self.device)
+                    gamma[r].requires_grad_()
+            elif self.config.model == 'HAN':
+                base = torch.FloatTensor(np.zeros(
+                    (hg.number_of_nodes(label), len(meta_path.values()), self.config.hidden * self.config.num_heads)))
+                gamma = base.uniform_(-self.config.alpha, self.config.alpha).to(self.device)
+                gamma.requires_grad_()
+            elif self.config.model == 'SimpleHGN':
+                num_edges = 0
+                for i in etypes:
+                    num_edges = num_edges + hg.number_of_edges(i)
+                base = torch.FloatTensor(np.zeros(
+                    (num_edges, self.config.num_heads)))
+                gamma = base.uniform_(-self.config.alpha, self.config.alpha).to(self.device)
+                gamma.requires_grad_()
             train_features = copy.deepcopy(features)
             train_features[label] = train_features[label] + delta
             logits = model(hg, train_features, gamma)
@@ -133,11 +221,19 @@ class Experiments(object):
 
             for _ in range(self.config.M - 1):
                 loss.backward()
-                for r in gamma.keys():
+                if self.config.model == 'RGCN' or self.config.model == 'RGAT' or self.config.model == 'HGT':
+                    for r in gamma.keys():
+                        try:
+                            rad_data = gamma[r].detach() + self.config.alpha * torch.sign(gamma[r].grad.detach())
+                            gamma[r].data = rad_data.data
+                            gamma[r].grad[:] = 0
+                        except:
+                            pass
+                else:
                     try:
-                        rad_data = gamma[r].detach() + self.config.alpha * torch.sign(gamma[r].grad.detach())
-                        gamma[r].data = rad_data.data
-                        gamma[r].grad[:] = 0
+                        rad_data = gamma.detach() + self.config.alpha * torch.sign(gamma.grad.detach())
+                        gamma.data = rad_data.data
+                        gamma.grad[:] = 0
                     except:
                         pass
 
@@ -147,7 +243,6 @@ class Experiments(object):
                     delta.grad[:] = 0
                 except:
                     pass
-
                 train_features = copy.deepcopy(features)
                 train_features[label] = train_features[label] + delta
                 logits = model(hg, train_features, gamma)
@@ -200,7 +295,7 @@ class Experiments(object):
                          etypes=path,
 
                          num_hidden_layers=self.config.num_layers,
-                       ).to(self.device)
+                         ).to(self.device)
         elif self.config.model == 'RGAT':
             model = RGAT(in_dim=features[label].shape[1],
                          h_dim=self.config.hidden,
@@ -338,4 +433,4 @@ class Experiments(object):
             test_AUC = test_AUC / test_count
 
             print('Test Loss {:.4f} | Test AUC  {:.4f}'.format(
-            test_loss, test_AUC))
+                test_loss, test_AUC))
