@@ -1,4 +1,4 @@
-# Unifying Gradient Regularization for Heterogeneous Graph Neural Networks
+# Grug: A Unified Gradient Regularization Method for Enhancing Stability and Robustness in Heterogeneous Graph Neural Networks
 
 This is the official repo for the paper Unifying Gradient Regularization for Heterogeneous Graph Neural Networks.
 **TL;DR:**: *Grug* regularizes gradients from both propagated messages and node features during message-passing and offers a unified framework that integrates graph topology and node features.
