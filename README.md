@@ -27,7 +27,7 @@ This is the official repo for the paper Unifying Gradient Regularization for Het
 
 ### Backbone models
 + [DropEdge](https://github.com/DropEdge/DropEdge)
-+ [DropNode](Graph random neural networks for semi-supervised learning on graphs)
++ [DropNode](https://github.com/THUDM/GRAND)
 + [DropMessage](https://github.com/zjunet/DropMessage)
 + [FLAG](https://github.com/devnkong/FLAG)
 
