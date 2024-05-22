@@ -8,7 +8,7 @@ from . import BaseModel, register_model
 from . import SemanticAttention
 from . import MetapathConv
 from openhgnn.utils.utils import extract_metapaths
-
+#
 
 @register_model('HAN')
 class HAN(BaseModel):
