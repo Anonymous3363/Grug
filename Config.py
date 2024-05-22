@@ -1,5 +1,5 @@
 import sys
-
+#
 class Config(object):
     def __init__(self, model,task,dataset,alpha,beta,M,hidden, num_layers, patience,num_epochs, lr, weight_decay, fixed_lr, max_lr, num_heads,edge_dim,negative_slope,Simple_beta):
         if model in ['RGCN', 'RGAT', 'HGT','HAN','SimpleHGN']:
